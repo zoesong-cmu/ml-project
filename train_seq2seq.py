@@ -37,7 +37,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # -------------------- Data Loading --------------------
-N_SAMPLES = 100000
+N_SAMPLES = 2000000
 
 def detect_delimiter(file_path):
     with open(file_path, 'rb') as f:
@@ -257,7 +257,7 @@ def evaluate(model, dataloader, criterion):
             total_loss += loss.item()
     return total_loss / len(dataloader)
 
-def translate(model, src_text, src_vocab, tgt_vocab, max_len=50, beam_size=3):
+def translate(model, src_text, src_vocab, tgt_vocab, max_len=50, beam_size=5):
     model.eval()
 
     tokens = [src_vocab.get(w, unk_idx) for w in tokenize(src_text)]
@@ -295,8 +295,11 @@ def translate(model, src_text, src_vocab, tgt_vocab, max_len=50, beam_size=3):
             if len(seq) > 2:
                 log_probs[seq[-2]] -= 0.5
 
-            for tok in set(seq[-3:]):
-                log_probs[tok] -= 0.3
+            if len(seq) > 3:
+                log_probs[seq[-3]] -= 0.2
+
+            for tok in set(seq[-5:]):
+                log_probs[tok] -= 0.5
 
             topk_log_probs, topk_indices = torch.topk(log_probs, beam_size)
 
@@ -310,7 +313,7 @@ def translate(model, src_text, src_vocab, tgt_vocab, max_len=50, beam_size=3):
 
         beams = sorted(
             new_beams,
-            key=lambda x: x[1] / (len(x[0]) ** 0.7),
+            key=lambda x: x[1] / (((5 + len(x[0])) / 6) ** 0.7),
             reverse=True
         )[:beam_size]
 
@@ -343,6 +346,8 @@ def compute_bleu(model, dataloader, src_vocab, tgt_vocab):
             inv_tgt_vocab = {v: k for k, v in tgt_vocab.items()}
             ref = [inv_tgt_vocab.get(tok, '<unk>') for tok in ref_tokens if tok not in (bos_idx, eos_idx, pad_idx)]
             hyp = translate(model, src_text, src_vocab, tgt_vocab).split()
+            if not hyp:
+                hyp = ['<empty>']
             references.append([ref])
             hypotheses.append(hyp)
     bleu = corpus_bleu(references, hypotheses, smoothing_function=SmoothingFunction().method1)
@@ -360,8 +365,16 @@ decoder = DecoderLSTM(tgt_vocab_size, embed_dim, hidden_dim, num_layers, dropout
 model = Seq2Seq(encoder, decoder).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=3e-4)
+
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer,
+    mode='min',
+    factor=0.5,
+    patience=2
+)
+
 criterion = nn.CrossEntropyLoss(ignore_index=pad_idx, label_smoothing=0.1)
-num_epochs = 30
+num_epochs = 400
 patience = 5
 best_val_loss = float('inf')
 epochs_no_improve = 0
@@ -375,6 +388,7 @@ for epoch in range(1, num_epochs+1):
 
     train_loss = train_epoch(model, train_loader, optimizer, criterion, teacher_forcing_ratio=tf_ratio)
     val_loss = evaluate(model, val_loader, criterion)
+    scheduler.step(val_loss)
     train_losses.append(train_loss)
     val_losses.append(val_loss)
     print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")

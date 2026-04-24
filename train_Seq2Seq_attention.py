@@ -36,7 +36,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # -------------------- Data load --------------------
-N_SAMPLES = 100000
+N_SAMPLES = 2000000
 
 def detect_delimiter(file_path):
     with open(file_path, 'rb') as f:
@@ -277,7 +277,7 @@ def evaluate(model, dataloader, criterion):
             total_loss += loss.item()
     return total_loss / len(dataloader)
 
-def translate(model, src_text, src_vocab, tgt_vocab, max_len=50, beam_size=3):
+def translate(model, src_text, src_vocab, tgt_vocab, max_len=50, beam_size=5):
     model.eval()
 
     # ---- encode ----
@@ -367,6 +367,8 @@ def compute_bleu(model, dataloader, src_vocab, tgt_vocab):
             inv_tgt_vocab = {v: k for k, v in tgt_vocab.items()}
             ref = [inv_tgt_vocab.get(tok, '<unk>') for tok in ref_tokens if tok not in (bos_idx, eos_idx, pad_idx)]
             hyp = translate(model, src_text, src_vocab, tgt_vocab).split()
+            if not hyp:
+                hyp = ['<empty>']
             references.append([ref])
             hypotheses.append(hyp)
     bleu = corpus_bleu(references, hypotheses, smoothing_function=SmoothingFunction().method1)
@@ -384,8 +386,16 @@ decoder = DecoderAttention(tgt_vocab_size, embed_dim, hidden_dim, num_layers, dr
 model = Seq2SeqAttention(encoder, decoder).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=5e-4)
+
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer,
+    mode='min',
+    factor=0.5,
+    patience=2
+)
+
 criterion = nn.CrossEntropyLoss(ignore_index=pad_idx, label_smoothing=0.1)
-num_epochs = 20
+num_epochs = 400
 patience = 5
 best_val_loss = float('inf')
 epochs_no_improve = 0
@@ -397,6 +407,7 @@ for epoch in range(1, num_epochs+1):
     print(f"Epoch {epoch}/{num_epochs}")
     train_loss = train_epoch(model, train_loader, optimizer, criterion, teacher_forcing_ratio)
     val_loss = evaluate(model, val_loader, criterion)
+    scheduler.step(val_loss)
     train_losses.append(train_loss)
     val_losses.append(val_loss)
     print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")

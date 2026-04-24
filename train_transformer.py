@@ -43,7 +43,7 @@ if torch.cuda.is_available():
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
-N_SAMPLES = 100000
+N_SAMPLES = 2000000
 
 def detect_delimiter(file_path):
     with open(file_path, 'rb') as f:
@@ -492,7 +492,7 @@ model = TransformerCustom(src_vocab_size, tgt_vocab_size, d_model, nhead, num_la
 
 optimizer = optim.Adam(model.parameters(), lr=3e-4)
 criterion = nn.CrossEntropyLoss(ignore_index=pad_idx, label_smoothing=0.1)
-num_epochs = 100
+num_epochs = 400
 patience = 5
 best_val_loss = float('inf')
 epochs_no_improve = 0
